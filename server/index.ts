@@ -56,3 +56,33 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+
+// 3. Add a New Song
+app.post('/api/songs', async (req: Request, res: Response) => {
+  try {
+    const { title, artist, language, genre, era, audio_url, cover_image_url, duration_seconds } = req.body;
+
+    // Basic validation: Don't let empty data ruin your database
+    if (!title || !artist || !audio_url) {
+      return res.status(400).json({ status: 'error', message: 'Title, Artist, and Audio URL are mandatory.' });
+    }
+
+    const newSong = await prisma.song.create({
+      data: {
+        title,
+        artist,
+        language: language || 'Unknown',
+        genre: genre || 'Unknown',
+        era: era || 'Unknown',
+        audio_url,
+        cover_image_url: cover_image_url || 'https://via.placeholder.com/500',
+        duration_seconds: Number(duration_seconds) || 0,
+      },
+    });
+
+    res.status(201).json({ status: 'success', data: newSong });
+  } catch (err) {
+    console.error("Upload Error:", err);
+    res.status(500).json({ status: 'error', message: 'Failed to add song' });
+  }
+});
