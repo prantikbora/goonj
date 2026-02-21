@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { View, StyleSheet, TouchableOpacity, Image, Text, StatusBar, Modal, Alert, SafeAreaView } from "react-native";
+import { View, StyleSheet, TouchableOpacity, Image, Text, StatusBar, Modal, Alert, SafeAreaView, ScrollView } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
@@ -30,6 +30,7 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isFullPlayerVisible, setIsFullPlayerVisible] = useState(false);
   const [isSliding, setIsSliding] = useState(false);
+  const [showLyrics, setShowLyrics] = useState(false); // NEW: Lyrics toggle state
 
   // --- Playback Progress ---
   const [progress, setProgress] = useState(0);
@@ -95,6 +96,7 @@ export default function App() {
       );
       setSound(newSound);
       setCurrentSong(song);
+      setShowLyrics(false); // Reset lyrics view when a new song starts
     } catch (error) {
       Alert.alert("Playback Error", "Could not load this track.");
     }
@@ -129,12 +131,11 @@ export default function App() {
     if (filteredList.length === 0) return;
     const shuffled = [...filteredList].sort(() => Math.random() - 0.5);
     setSongs(shuffled);
-    setTimeout(() => playSong(shuffled[0]), 100); // Small delay to sync state
+    setTimeout(() => playSong(shuffled[0]), 100);
   };
 
   const resetShuffle = async () => {
     try {
-      // Re-fetch original order from DB to reset the queue
       const res = await axios.get(API_URL);
       setSongs(res.data.data);
       Alert.alert("Goonj", "Shuffle disabled. Returning to original order.");
@@ -162,6 +163,7 @@ export default function App() {
       <StatusBar barStyle="light-content" />
       <NavigationContainer>
         <Tab.Navigator
+          id="main-tabs" 
           screenOptions={({ route }) => ({
             headerShown: false,
             tabBarStyle: styles.tabBar,
@@ -189,6 +191,7 @@ export default function App() {
         </Tab.Navigator>
       </NavigationContainer>
 
+      {/* MINI PLAYER */}
       {currentSong && !isFullPlayerVisible && (
         <TouchableOpacity style={styles.miniPlayer} activeOpacity={0.9} onPress={() => setIsFullPlayerVisible(true)}>
           <Image source={{ uri: currentSong.cover_image_url }} style={styles.miniCover} />
@@ -202,25 +205,58 @@ export default function App() {
         </TouchableOpacity>
       )}
 
+      {/* FULL PLAYER MODAL */}
       <Modal visible={isFullPlayerVisible} animationType="slide">
         <View style={styles.fullPlayer}>
+          
+          {/* Header Controls */}
           <View style={styles.fullHeader}>
-            <TouchableOpacity onPress={() => setIsFullPlayerVisible(false)}><Ionicons name="chevron-down" size={40} color="#FFF" /></TouchableOpacity>
-            <TouchableOpacity onPress={() => setSleepTimer(sleepTimer ? null : 30)} style={{ alignItems: 'center' }}>
-              <Ionicons name="timer-outline" size={30} color={sleepTimer ? "#8A2BE2" : "#FFF"} />
-              {sleepTimer !== null && <Text style={{ color: "#8A2BE2", fontSize: 10 }}>{sleepTimer}m</Text>}
+            <TouchableOpacity onPress={() => setIsFullPlayerVisible(false)}>
+              <Ionicons name="chevron-down" size={36} color="#FFF" />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => toggleFavorite(currentSong?.id)}>
-              <Ionicons name={favorites.includes(currentSong?.id) ? "heart" : "heart-outline"} size={32} color={favorites.includes(currentSong?.id) ? "#8A2BE2" : "#FFF"} />
-            </TouchableOpacity>
+            
+            <View style={styles.headerRightControls}>
+              {/* Lyrics Toggle */}
+              <TouchableOpacity onPress={() => setShowLyrics(!showLyrics)} style={styles.iconBtn}>
+                <Ionicons name="document-text" size={28} color={showLyrics ? "#8A2BE2" : "#FFF"} />
+              </TouchableOpacity>
+
+              {/* Sleep Timer */}
+              <TouchableOpacity onPress={() => setSleepTimer(sleepTimer ? null : 30)} style={styles.iconBtn}>
+                <Ionicons name="timer-outline" size={28} color={sleepTimer ? "#8A2BE2" : "#FFF"} />
+                {sleepTimer !== null && <Text style={styles.timerText}>{sleepTimer}m</Text>}
+              </TouchableOpacity>
+
+              {/* Favorite Toggle */}
+              <TouchableOpacity onPress={() => toggleFavorite(currentSong?.id)} style={styles.iconBtn}>
+                <Ionicons name={favorites.includes(currentSong?.id) ? "heart" : "heart-outline"} size={30} color={favorites.includes(currentSong?.id) ? "#8A2BE2" : "#FFF"} />
+              </TouchableOpacity>
+            </View>
           </View>
 
-          <Image source={{ uri: currentSong?.cover_image_url }} style={styles.fullCover} />
-          <View style={{ width: '100%', alignItems: 'center', marginBottom: 30 }}>
-            <Text style={styles.fullTitle}>{currentSong?.title}</Text>
-            <Text style={styles.fullArtist}>{currentSong?.artist}</Text>
+          {/* Main Content Area: Toggles between Cover Art and Lyrics */}
+          <View style={styles.mainContentArea}>
+            {showLyrics ? (
+              <ScrollView style={styles.lyricsScrollView} contentContainerStyle={{ paddingBottom: 20 }}>
+                <Text style={styles.lyricsTitle}>{currentSong?.title}</Text>
+                <Text style={styles.lyricsText}>
+                  {currentSong?.lyrics 
+                    ? currentSong.lyrics 
+                    : "Lyrics are not available for this track yet.\n\nUpdate your database and upload screen to support a 'lyrics' text field."}
+                </Text>
+              </ScrollView>
+            ) : (
+              <>
+                <Image source={{ uri: currentSong?.cover_image_url }} style={styles.fullCover} />
+                <View style={{ width: '100%', alignItems: 'center' }}>
+                  <Text style={styles.fullTitle} numberOfLines={2}>{currentSong?.title}</Text>
+                  <Text style={styles.fullArtist}>{currentSong?.artist}</Text>
+                </View>
+              </>
+            )}
           </View>
 
+          {/* Progress Bar */}
           <View style={styles.progressContainer}>
             <Slider
               style={{ width: "100%", height: 40 }}
@@ -239,30 +275,46 @@ export default function App() {
             </View>
           </View>
 
+          {/* Playback Controls */}
           <View style={styles.controlsRow}>
-            <TouchableOpacity onPress={() => skipTrack("prev")}><Ionicons name="play-skip-back" size={40} color="#FFF" /></TouchableOpacity>
-            <TouchableOpacity onPress={togglePlayPause}><Ionicons name={isPlaying ? "pause-circle" : "play-circle"} size={90} color="#8A2BE2" /></TouchableOpacity>
-            <TouchableOpacity onPress={() => skipTrack("next")}><Ionicons name="play-skip-forward" size={40} color="#FFF" /></TouchableOpacity>
+            <TouchableOpacity onPress={() => skipTrack("prev")}>
+              <Ionicons name="play-skip-back" size={40} color="#FFF" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={togglePlayPause}>
+              <Ionicons name={isPlaying ? "pause-circle" : "play-circle"} size={90} color="#8A2BE2" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => skipTrack("next")}>
+              <Ionicons name="play-skip-forward" size={40} color="#FFF" />
+            </TouchableOpacity>
           </View>
+
         </View>
       </Modal>
     </SafeAreaView>
   );
 }
 
+// --- STYLES ---
 const styles = StyleSheet.create({
   tabBar: { backgroundColor: "#121212", borderTopWidth: 0, height: 65, paddingBottom: 10, position: "absolute" },
   miniPlayer: { position: "absolute", bottom: 85, left: 10, right: 10, height: 65, backgroundColor: "#1E1E1E", borderRadius: 12, flexDirection: "row", alignItems: "center", padding: 10, zIndex: 1000 },
   miniCover: { width: 45, height: 45, borderRadius: 6 },
   miniTitle: { color: "#FFF", fontWeight: "bold", fontSize: 14 },
   miniArtist: { color: "#AAA", fontSize: 12 },
-  fullPlayer: { flex: 1, backgroundColor: "#000", alignItems: "center", padding: 30 },
-  fullHeader: { flexDirection: "row", justifyContent: "space-between", width: "100%", marginBottom: 30 },
+  fullPlayer: { flex: 1, backgroundColor: "#000", alignItems: "center", padding: 30, paddingTop: 50 },
+  fullHeader: { flexDirection: "row", justifyContent: "space-between", width: "100%", marginBottom: 20 },
+  headerRightControls: { flexDirection: "row", alignItems: "center" },
+  iconBtn: { marginLeft: 20, alignItems: "center" },
+  timerText: { color: "#8A2BE2", fontSize: 10, position: "absolute", bottom: -12 },
+  mainContentArea: { flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
   fullCover: { width: 320, height: 320, borderRadius: 20, marginBottom: 30 },
   fullTitle: { color: "#FFF", fontSize: 26, fontWeight: "bold", textAlign: "center" },
   fullArtist: { color: "#AAA", fontSize: 18, marginTop: 5 },
-  progressContainer: { width: "100%", marginBottom: 30 },
+  lyricsScrollView: { flex: 1, width: '100%', paddingHorizontal: 10 },
+  lyricsTitle: { color: "#FFF", fontSize: 22, fontWeight: "bold", textAlign: "center", marginBottom: 20 },
+  lyricsText: { color: "#CCC", fontSize: 18, lineHeight: 32, textAlign: "center" },
+  progressContainer: { width: "100%", marginBottom: 20 },
   timeRow: { flexDirection: "row", justifyContent: "space-between", marginTop: -5 },
   timeText: { color: "#888", fontSize: 12 },
-  controlsRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-around", width: "80%" },
+  controlsRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-around", width: "80%", marginBottom: 20 },
 });

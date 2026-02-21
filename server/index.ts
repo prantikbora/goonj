@@ -43,7 +43,9 @@ app.get('/api/songs', async (req: Request, res: Response) => {
 // 3. Add Song (POST)
 app.post('/api/songs', async (req: Request, res: Response) => {
   try {
-    const { title, artist, language, audio_url, cover_image_url } = req.body;
+    // FIX: Extracted lyrics from req.body
+    const { title, artist, language, audio_url, cover_image_url, lyrics } = req.body;
+    
     if (!title || !artist || !audio_url) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
@@ -55,7 +57,10 @@ app.post('/api/songs', async (req: Request, res: Response) => {
         language: language || 'Unknown',
         audio_url,
         cover_image_url: cover_image_url || 'https://via.placeholder.com/500',
-        genre: 'Pop', era: '2020s', duration_seconds: 0
+        genre: 'Pop', 
+        era: '2020s', 
+        duration_seconds: 0,
+        lyrics: lyrics || null // FIX: Passed lyrics to Prisma
       }
     });
     res.status(201).json({ status: 'success', data: newSong });

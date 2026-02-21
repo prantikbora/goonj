@@ -27,6 +27,7 @@ model Song {
   audio_url        String
   cover_image_url  String?
   duration_seconds Int
+  lyrics           String?        @db.Text
   created_at       DateTime       @default(now())
   playlists        PlaylistSong[]
 
