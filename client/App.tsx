@@ -1,7 +1,8 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
-import { View, StyleSheet, TouchableOpacity, Image, Text, StatusBar, Modal, Alert, SafeAreaView, ScrollView } from "react-native";
+import React, { useEffect, useState, useCallback, useContext } from "react";
+import { View, StyleSheet, TouchableOpacity, Image, Text, StatusBar, Modal, Alert, SafeAreaView, ScrollView, ActivityIndicator } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
 import Slider from "@react-native-community/slider";
@@ -9,37 +10,48 @@ import axios from "axios";
 import Constants from "expo-constants";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+// --- Screens & Context ---
 import HomeScreen from "./src/screens/HomeScreen";
 import SearchScreen from "./src/screens/SearchScreen";
 import UploadScreen from "./src/screens/UploadScreen";
+import LoginScreen from "./src/screens/auth/LoginScreen";
+import RegisterScreen from "./src/screens/auth/RegisterScreen";
+import PlaylistScreen from "./src/screens/PlaylistScreen";
+import { AuthProvider, AuthContext } from "./src/context/AuthContext";
 
 // --- Types & Constants ---
-export type RootTabParamList = { Home: undefined; Search: undefined; Upload: undefined; };
+export type RootTabParamList = { Home: undefined; Search: undefined; Upload: undefined; Library: undefined; };
 const Tab = createBottomTabNavigator<RootTabParamList>();
+const Stack = createNativeStackNavigator();
 
 const hostUri = Constants.expoConfig?.hostUri;
 const localIp = hostUri ? hostUri.split(":")[0] : "localhost";
 const API_URL = `http://${localIp}:5000/api/songs`;
+const PLAYLIST_API_URL = `http://${localIp}:5000/api/playlists`;
 const FAV_KEY = "goonj-favorites";
 
-export default function App() {
-  // --- Master State ---
+// ==========================================
+// 1. MAIN AUTHENTICATED APP (Music Player)
+// ==========================================
+function MainApp() {
   const [songs, setSongs] = useState<any[]>([]);
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [currentSong, setCurrentSong] = useState<any>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isFullPlayerVisible, setIsFullPlayerVisible] = useState(false);
   const [isSliding, setIsSliding] = useState(false);
-  const [showLyrics, setShowLyrics] = useState(false); // NEW: Lyrics toggle state
+  const [showLyrics, setShowLyrics] = useState(false);
 
-  // --- Playback Progress ---
   const [progress, setProgress] = useState(0);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [sleepTimer, setSleepTimer] = useState<number | null>(null);
 
-  // --- Data Fetching ---
+  // --- NEW: Add to Playlist State ---
+  const [isPlaylistModalVisible, setIsPlaylistModalVisible] = useState(false);
+  const [myPlaylists, setMyPlaylists] = useState<any[]>([]);
+
   const fetchData = useCallback(async () => {
     try {
       const [res, storedFavs] = await Promise.all([
@@ -58,7 +70,6 @@ export default function App() {
     return () => { if (sound) sound.unloadAsync(); };
   }, [fetchData]);
 
-  // --- Sleep Timer Logic ---
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (sleepTimer !== null && sleepTimer > 0) {
@@ -73,7 +84,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [sleepTimer]);
 
-  // --- Audio Handlers ---
   const onPlaybackStatusUpdate = useCallback((status: any) => {
     if (status.isLoaded) {
       if (!isSliding) {
@@ -96,7 +106,7 @@ export default function App() {
       );
       setSound(newSound);
       setCurrentSong(song);
-      setShowLyrics(false); // Reset lyrics view when a new song starts
+      setShowLyrics(false);
     } catch (error) {
       Alert.alert("Playback Error", "Could not load this track.");
     }
@@ -126,7 +136,6 @@ export default function App() {
     if (sound) await sound.setPositionAsync(value * duration);
   };
 
-  // --- Logic Features ---
   const shuffleAndPlay = (filteredList: any[]) => {
     if (filteredList.length === 0) return;
     const shuffled = [...filteredList].sort(() => Math.random() - 0.5);
@@ -158,38 +167,50 @@ export default function App() {
     return `${minutes}:${Number(seconds) < 10 ? "0" : ""}${seconds}`;
   };
 
+  // --- NEW: Playlist Functions ---
+  const openPlaylistModal = async () => {
+    setIsPlaylistModalVisible(true);
+    try {
+      const res = await axios.get(PLAYLIST_API_URL);
+      setMyPlaylists(res.data.data);
+    } catch (error) {
+      Alert.alert("Error", "Could not fetch your playlists.");
+    }
+  };
+
+  const handleAddToPlaylist = async (playlistId: string) => {
+    if (!currentSong) return;
+    try {
+      await axios.post(`${PLAYLIST_API_URL}/add-song`, {
+        playlistId,
+        songId: currentSong.id
+      });
+      Alert.alert("Success", "Song added to playlist!");
+      setIsPlaylistModalVisible(false);
+    } catch (error: any) {
+      Alert.alert("Notice", error.response?.data?.message || "Failed to add song.");
+    }
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#000" }}>
-      <StatusBar barStyle="light-content" />
-      <NavigationContainer>
-        <Tab.Navigator
-          id="main-tabs" 
-          screenOptions={({ route }) => ({
-            headerShown: false,
-            tabBarStyle: styles.tabBar,
-            tabBarActiveTintColor: "#8A2BE2",
-            tabBarIcon: ({ color, size }) => {
-              const icons: Record<string, string> = { Home: "home", Search: "search", Upload: "cloud-upload" };
-              return <Ionicons name={icons[route.name] as any} size={size} color={color} />;
-            },
-          })}
-        >
-          <Tab.Screen name="Home">
-            {() => (
-              <HomeScreen 
-                songs={songs} 
-                onPlay={playSong} 
-                currentSongId={currentSong?.id} 
-                favorites={favorites} 
-                onShuffle={shuffleAndPlay} 
-                onResetShuffle={resetShuffle} 
-              />
-            )}
-          </Tab.Screen>
-          <Tab.Screen name="Search">{() => <SearchScreen songs={songs} onPlay={playSong} />}</Tab.Screen>
-          <Tab.Screen name="Upload">{() => <UploadScreen apiUrl={API_URL} onUploadSuccess={fetchData} />}</Tab.Screen>
-        </Tab.Navigator>
-      </NavigationContainer>
+      <Tab.Navigator
+        id="main-tabs" 
+        screenOptions={({ route }) => ({
+          headerShown: false,
+          tabBarStyle: styles.tabBar,
+          tabBarActiveTintColor: "#8A2BE2",
+          tabBarIcon: ({ color, size }) => {
+            const icons: Record<string, string> = { Home: "home", Search: "search", Upload: "cloud-upload", Library: "albums" };
+            return <Ionicons name={icons[route.name] as any} size={size} color={color} />;
+          },
+        })}
+      >
+        <Tab.Screen name="Home">{() => <HomeScreen songs={songs} onPlay={playSong} currentSongId={currentSong?.id} favorites={favorites} onShuffle={shuffleAndPlay} onResetShuffle={resetShuffle} />}</Tab.Screen>
+        <Tab.Screen name="Search">{() => <SearchScreen songs={songs} onPlay={playSong} />}</Tab.Screen>
+        <Tab.Screen name="Upload">{() => <UploadScreen apiUrl={API_URL} onUploadSuccess={fetchData} />}</Tab.Screen>
+       <Tab.Screen name="Library">{() => <PlaylistScreen onPlay={playSong} />}</Tab.Screen>
+      </Tab.Navigator>
 
       {/* MINI PLAYER */}
       {currentSong && !isFullPlayerVisible && (
@@ -209,41 +230,37 @@ export default function App() {
       <Modal visible={isFullPlayerVisible} animationType="slide">
         <View style={styles.fullPlayer}>
           
-          {/* Header Controls */}
           <View style={styles.fullHeader}>
             <TouchableOpacity onPress={() => setIsFullPlayerVisible(false)}>
               <Ionicons name="chevron-down" size={36} color="#FFF" />
             </TouchableOpacity>
             
             <View style={styles.headerRightControls}>
-              {/* Lyrics Toggle */}
+              {/* NEW: Add to Playlist Button */}
+              <TouchableOpacity onPress={openPlaylistModal} style={styles.iconBtn}>
+                <Ionicons name="list" size={28} color="#FFF" />
+              </TouchableOpacity>
+
               <TouchableOpacity onPress={() => setShowLyrics(!showLyrics)} style={styles.iconBtn}>
                 <Ionicons name="document-text" size={28} color={showLyrics ? "#8A2BE2" : "#FFF"} />
               </TouchableOpacity>
 
-              {/* Sleep Timer */}
               <TouchableOpacity onPress={() => setSleepTimer(sleepTimer ? null : 30)} style={styles.iconBtn}>
                 <Ionicons name="timer-outline" size={28} color={sleepTimer ? "#8A2BE2" : "#FFF"} />
                 {sleepTimer !== null && <Text style={styles.timerText}>{sleepTimer}m</Text>}
               </TouchableOpacity>
 
-              {/* Favorite Toggle */}
               <TouchableOpacity onPress={() => toggleFavorite(currentSong?.id)} style={styles.iconBtn}>
                 <Ionicons name={favorites.includes(currentSong?.id) ? "heart" : "heart-outline"} size={30} color={favorites.includes(currentSong?.id) ? "#8A2BE2" : "#FFF"} />
               </TouchableOpacity>
             </View>
           </View>
 
-          {/* Main Content Area: Toggles between Cover Art and Lyrics */}
           <View style={styles.mainContentArea}>
             {showLyrics ? (
               <ScrollView style={styles.lyricsScrollView} contentContainerStyle={{ paddingBottom: 20 }}>
                 <Text style={styles.lyricsTitle}>{currentSong?.title}</Text>
-                <Text style={styles.lyricsText}>
-                  {currentSong?.lyrics 
-                    ? currentSong.lyrics 
-                    : "Lyrics are not available for this track yet.\n\nUpdate your database and upload screen to support a 'lyrics' text field."}
-                </Text>
+                <Text style={styles.lyricsText}>{currentSong?.lyrics ? currentSong.lyrics : "Lyrics are not available for this track yet."}</Text>
               </ScrollView>
             ) : (
               <>
@@ -256,26 +273,14 @@ export default function App() {
             )}
           </View>
 
-          {/* Progress Bar */}
           <View style={styles.progressContainer}>
-            <Slider
-              style={{ width: "100%", height: 40 }}
-              minimumValue={0}
-              maximumValue={1}
-              value={progress}
-              minimumTrackTintColor="#8A2BE2"
-              maximumTrackTintColor="#333"
-              thumbTintColor="#8A2BE2"
-              onSlidingStart={() => setIsSliding(true)}
-              onSlidingComplete={(val) => { setIsSliding(false); onSeek(val); }}
-            />
+            <Slider style={{ width: "100%", height: 40 }} minimumValue={0} maximumValue={1} value={progress} minimumTrackTintColor="#8A2BE2" maximumTrackTintColor="#333" thumbTintColor="#8A2BE2" onSlidingStart={() => setIsSliding(true)} onSlidingComplete={(val) => { setIsSliding(false); onSeek(val); }} />
             <View style={styles.timeRow}>
               <Text style={styles.timeText}>{formatTime(position)}</Text>
               <Text style={styles.timeText}>{formatTime(duration)}</Text>
             </View>
           </View>
 
-          {/* Playback Controls */}
           <View style={styles.controlsRow}>
             <TouchableOpacity onPress={() => skipTrack("prev")}>
               <Ionicons name="play-skip-back" size={40} color="#FFF" />
@@ -289,8 +294,83 @@ export default function App() {
           </View>
 
         </View>
+
+        {/* --- NEW: ADD TO PLAYLIST MODAL --- */}
+        <Modal visible={isPlaylistModalVisible} animationType="fade" transparent={true}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalHeader}>Add to Playlist</Text>
+              
+              {myPlaylists.length === 0 ? (
+                <Text style={{ color: '#888', textAlign: 'center', marginBottom: 20 }}>No playlists found. Create one in the Library tab first.</Text>
+              ) : (
+                <ScrollView style={{ maxHeight: 300, marginBottom: 20 }}>
+                  {myPlaylists.map(playlist => (
+                    <TouchableOpacity 
+                      key={playlist.id} 
+                      style={styles.playlistOption} 
+                      onPress={() => handleAddToPlaylist(playlist.id)}
+                    >
+                      <Ionicons name="musical-notes" size={20} color="#8A2BE2" style={{ marginRight: 15 }} />
+                      <Text style={styles.playlistOptionText}>{playlist.title}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setIsPlaylistModalVisible(false)}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+// ==========================================
+// 2. AUTH NAVIGATOR (Login / Register)
+// ==========================================
+function AuthNavigator() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="Login" component={LoginScreen} />
+      <Stack.Screen name="Register" component={RegisterScreen} />
+    </Stack.Navigator>
+  );
+}
+
+// ==========================================
+// 3. ROOT GATEKEEPER
+// ==========================================
+function RootNavigator() {
+  const auth = useContext(AuthContext);
+
+  if (auth?.isLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: "#000", justifyContent: "center", alignItems: "center" }}>
+        <ActivityIndicator size="large" color="#8A2BE2" />
+      </View>
+    );
+  }
+
+  return (
+    <NavigationContainer>
+      <StatusBar barStyle="light-content" />
+      {auth?.token ? <MainApp /> : <AuthNavigator />}
+    </NavigationContainer>
+  );
+}
+
+// ==========================================
+// 4. APP ENTRY POINT
+// ==========================================
+export default function App() {
+  return (
+    <AuthProvider>
+      <RootNavigator />
+    </AuthProvider>
   );
 }
 
@@ -317,4 +397,13 @@ const styles = StyleSheet.create({
   timeRow: { flexDirection: "row", justifyContent: "space-between", marginTop: -5 },
   timeText: { color: "#888", fontSize: 12 },
   controlsRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-around", width: "80%", marginBottom: 20 },
+  
+  // Modal Styles
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 20 },
+  modalContent: { backgroundColor: '#161616', padding: 25, borderRadius: 15 },
+  modalHeader: { color: '#FFF', fontSize: 22, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
+  playlistOption: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#222', padding: 15, borderRadius: 10, marginBottom: 10 },
+  playlistOptionText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  cancelBtn: { padding: 15, alignItems: 'center', backgroundColor: '#333', borderRadius: 10 },
+  cancelBtnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 }
 });
